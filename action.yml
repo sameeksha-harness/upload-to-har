@@ -1,0 +1,45 @@
+name: 'Upload to Harness Artifact Registry'
+description: 'Upload a local file to Harness Artifact Registry using the harness CLI (hc)'
+author: 'Harness'
+
+inputs:
+  api-url:
+    description: 'Harness API base URL (e.g. http://localhost:3000, https://qa.harness.io, https://app.harness.io)'
+    required: true
+  account:
+    description: 'Harness account ID'
+    required: true
+  token:
+    description: 'Harness PAT token'
+    required: true
+  registry:
+    description: 'HAR registry name'
+    required: true
+  type:
+    description: 'Artifact type: generic, docker, maven, rpm, npm, conda, composer, go, cargo, dart, python, nuget, swift, puppet, debian'
+    required: true
+  file:
+    description: 'Local path to the file to upload'
+    required: true
+  name:
+    description: 'Artifact/package name (used for generic type)'
+    required: true
+  version:
+    description: 'Artifact version'
+    required: true
+  extra-args:
+    description: 'Newline-separated extra CLI arguments appended to the push command'
+    required: false
+    default: ''
+
+outputs:
+  registry-path:
+    description: 'The registry/name@version path of the uploaded artifact'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+branding:
+  icon: 'upload-cloud'
+  color: 'green'

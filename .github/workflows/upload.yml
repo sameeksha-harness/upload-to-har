@@ -1,0 +1,26 @@
+name: Upload to HAR
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install harness CLI
+        run: curl -fsSL https://raw.githubusercontent.com/harness/harness-cli/v2/install | sh
+
+      - name: Upload to HAR
+        uses: sameeksha-harness/upload-to-har@main
+        with:
+          api-url: https://qa.harness.io
+          account: ${{ secrets.HARNESS_ACCOUNT_ID }}
+          token: ${{ secrets.HARNESS_PAT_TOKEN }}
+          registry: ${{ secrets.HARNESS_REGISTRY }}
+          type: generic
+          file: ./test-artifact.txt
+          name: my-artifact
+          version: ${{ github.sha }}

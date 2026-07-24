@@ -1,0 +1,7 @@
+node_modules/
+dist/
+lib/
+coverage/
+
+# Local environment — contains real tokens, NEVER commit
+.env.local
