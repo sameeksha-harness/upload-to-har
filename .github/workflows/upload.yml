@@ -16,7 +16,7 @@ jobs:
       - name: Upload to HAR
         uses: sameeksha-harness/upload-to-har@main
         with:
-          api-url: https://qa.harness.io
+          api-url: https://prod1.harness.io
           account: ${{ secrets.HARNESS_ACCOUNT_ID }}
           token: ${{ secrets.HARNESS_PAT_TOKEN }}
           registry: ${{ secrets.HARNESS_REGISTRY }}
