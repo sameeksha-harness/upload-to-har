@@ -23,7 +23,4 @@ jobs:
           type: go
           file: .
           name: my-module
-          version: ${{ github.sha }}
-          extra-args: |
-            --pkg-url
-            pkg.harness.io
+          version: v0.0.1
