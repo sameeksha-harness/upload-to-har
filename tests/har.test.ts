@@ -68,6 +68,26 @@ describe('buildPushArgs', () => {
     ]);
   });
 
+  test('go type includes --version flag', () => {
+    const inputs: HarInputs = { ...baseInputs, type: 'go', file: '/tmp/gotest' };
+    const args = buildPushArgs(inputs);
+    expect(args).toEqual([
+      'artifact', 'push', 'go',
+      'my-registry', '/tmp/gotest',
+      '--version', '2.1.0',
+    ]);
+  });
+
+  test('terraform type includes --version flag', () => {
+    const inputs: HarInputs = { ...baseInputs, type: 'terraform', file: '/tmp/module' };
+    const args = buildPushArgs(inputs);
+    expect(args).toEqual([
+      'artifact', 'push', 'terraform',
+      'my-registry', '/tmp/module',
+      '--version', '2.1.0',
+    ]);
+  });
+
   test('non-generic type with extra-args appends them', () => {
     const inputs: HarInputs = {
       ...baseInputs,

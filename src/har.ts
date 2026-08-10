@@ -81,8 +81,11 @@ export function buildPushArgs(inputs: HarInputs): string[] {
   if (type === 'generic') {
     // push_generic.go: --name is required, --version defaults to "1.0.0"
     typeFlags = ['--name', name, '--version', version];
+  } else if (type === 'go' || type === 'terraform') {
+    // push_go.go, push_terraform.go: support --version flag
+    // all other types read version from the package file's own metadata
+    typeFlags = ['--version', version];
   } else {
-    // All other push_<type>.go commands: positional args only; no --name / --version flags.
     typeFlags = [];
   }
 

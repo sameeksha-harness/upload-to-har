@@ -19,8 +19,11 @@ jobs:
           api-url: https://prod1.harness.io
           account: ${{ secrets.HARNESS_ACCOUNT_ID }}
           token: ${{ secrets.HARNESS_PAT_TOKEN }}
-          registry: ${{ secrets.HARNESS_REGISTRY }}
-          type: generic
-          file: ./test-artifact.txt
-          name: my-artifact
+          registry: gotest
+          type: go
+          file: .
+          name: my-module
           version: ${{ github.sha }}
+          extra-args: |
+            --pkg-url
+            pkg.harness.io
