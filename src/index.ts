@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import { login, push, HarInputs, ExecFn } from './har';
+import { ensureHc } from './install';
 
 function buildExecFn(): ExecFn {
   return async (cmd: string, args: string[]) => {
@@ -31,6 +32,8 @@ function parseExtraArgs(raw: string): string[] {
 
 async function run(): Promise<void> {
   try {
+    await ensureHc();
+
     const token = core.getInput('token', { required: true });
     // Mask the token so it never appears in logs
     core.setSecret(token);

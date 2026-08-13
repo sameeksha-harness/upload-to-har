@@ -25808,6 +25808,7 @@ exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
 const exec = __importStar(__nccwpck_require__(5236));
 const har_1 = __nccwpck_require__(804);
+const install_1 = __nccwpck_require__(232);
 function buildExecFn() {
     return async (cmd, args) => {
         let stdout = '';
@@ -25833,6 +25834,7 @@ function parseExtraArgs(raw) {
 }
 async function run() {
     try {
+        await (0, install_1.ensureHc)();
         const token = core.getInput('token', { required: true });
         // Mask the token so it never appears in logs
         core.setSecret(token);
@@ -25864,6 +25866,67 @@ async function run() {
 /* istanbul ignore next */
 if (require.main === require.cache[eval('__filename')] || process.env.GITHUB_ACTIONS) {
     run();
+}
+
+
+/***/ }),
+
+/***/ 232:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ensureHc = ensureHc;
+const core = __importStar(__nccwpck_require__(7484));
+const exec = __importStar(__nccwpck_require__(5236));
+async function ensureHc() {
+    const alreadyInstalled = await exec.exec('which', ['hc'], {
+        ignoreReturnCode: true,
+        silent: true,
+    }) === 0;
+    if (alreadyInstalled) {
+        core.debug('hc already on PATH, skipping install');
+        return;
+    }
+    core.info('Installing harness CLI (hc)...');
+    await exec.exec('sh', [
+        '-c',
+        'curl -fsSL https://raw.githubusercontent.com/harness/harness-cli/v2/install | sh',
+    ]);
 }
 
 
