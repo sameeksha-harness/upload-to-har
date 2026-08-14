@@ -16,6 +16,8 @@ const mockInfo = jest.fn();
 const mockStartGroup = jest.fn();
 const mockEndGroup = jest.fn();
 
+const mockDebug = jest.fn();
+
 jest.mock('@actions/core', () => ({
   getInput: mockGetInput,
   setOutput: mockSetOutput,
@@ -24,6 +26,7 @@ jest.mock('@actions/core', () => ({
   info: mockInfo,
   startGroup: mockStartGroup,
   endGroup: mockEndGroup,
+  debug: mockDebug,
 }));
 
 const mockExec = jest.fn();
@@ -79,8 +82,8 @@ describe('main orchestration', () => {
 
     await runModule();
 
-    // login call
-    expect(execCalls[0]).toEqual([
+    // login call (execCalls[0] is the `which hc` check from ensureHc)
+    expect(execCalls[1]).toEqual([
       'auth', 'login',
       '--api-url', 'http://localhost:3000',
       '--api-token', 'pat.acc-123.abc.xyz',
@@ -89,7 +92,7 @@ describe('main orchestration', () => {
     ]);
 
     // push call
-    expect(execCalls[1]).toEqual([
+    expect(execCalls[2]).toEqual([
       'artifact', 'push', 'generic',
       'my-reg', '/tmp/file.tar.gz',
       '--name', 'my-pkg',
@@ -164,7 +167,7 @@ describe('main orchestration', () => {
 
     await runModule();
 
-    const pushArgs = execCalls[1];
+    const pushArgs = execCalls[2];
     expect(pushArgs).toContain('--include-hidden');
     expect(pushArgs).toContain('--description');
     expect(pushArgs).toContain('a description');
