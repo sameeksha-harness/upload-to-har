@@ -70,6 +70,6 @@ async function run(): Promise<void> {
 export { run };
 
 /* istanbul ignore next */
-if (require.main === module || process.env.GITHUB_ACTIONS) {
+if (require.main === module) {
   run();
 }

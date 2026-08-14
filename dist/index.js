@@ -25864,7 +25864,7 @@ async function run() {
     }
 }
 /* istanbul ignore next */
-if (require.main === require.cache[eval('__filename')] || process.env.GITHUB_ACTIONS) {
+if (require.main === require.cache[eval('__filename')]) {
     run();
 }
 
