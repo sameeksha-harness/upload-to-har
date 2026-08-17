@@ -34,27 +34,38 @@ jest.mock('@actions/exec', () => ({
   exec: mockExec,
 }));
 
+// Mock fs so validateInputs doesn't hit the real filesystem
+jest.mock('fs', () => ({
+  ...jest.requireActual('fs'),
+  existsSync: jest.fn().mockReturnValue(true),
+}));
+
 // Import run() AFTER mocks are in place.
-// We re-require each test so module-level side effects (the bare `run()` call
-// at the bottom of index.ts) are flushed per-test via jest.resetModules().
+// We re-require each test so fresh module state is created per-test via jest.resetModules().
+// run() is NOT auto-invoked during require (the `if (require.main === module)` guard
+// in index.ts prevents it); we call mod.run() explicitly.
 async function runModule(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const mod = require('../src/index');
-  // run() is both called at module load AND exported; await the export
-  // so the test waits for the full async execution.
   await mod.run();
 }
 
 const INPUTS: Record<string, string> = {
-  'api-url':    'http://localhost:3000',
-  'account':    'acc-123',
-  'token':      'pat.acc-123.abc.xyz',
-  'registry':   'my-reg',
-  'type':       'generic',
-  'file':       '/tmp/file.tar.gz',
-  'name':       'my-pkg',
-  'version':    '1.0.0',
-  'extra-args': '',
+  'api-url':      'http://localhost:3000',
+  'account':      'acc-123',
+  'token':        'pat.acc-123.abc.xyz',
+  'registry':     'my-reg',
+  'type':         'generic',
+  'file':         '/tmp/file.tar.gz',
+  'name':         'my-pkg',
+  'version':      '1.0.0',
+  'extra-args':   '',
+  'pom-file':     '',
+  'distribution': '',
+  'component':    '',
+  'namespace':    '',
+  'scope':        '',
+  'reference':    '',
 };
 
 function setupInputMock(overrides: Record<string, string> = {}) {
@@ -154,6 +165,32 @@ describe('main orchestration', () => {
     await runModule();
 
     expect(mockSetSecret).toHaveBeenCalledWith('pat.acc-123.abc.xyz');
+  });
+
+  test('unsupported type propagates to setFailed', async () => {
+    setupInputMock({ type: 'docker' });
+    mockExec.mockResolvedValue(0);
+
+    await runModule();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Unsupported artifact type: "docker"'),
+    );
+    expect(mockSetOutput).not.toHaveBeenCalled();
+  });
+
+  test('file not found propagates to setFailed', async () => {
+    setupInputMock();
+    const fs = require('fs');
+    fs.existsSync.mockReturnValue(false);
+    mockExec.mockResolvedValue(0);
+
+    await runModule();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('File not found'),
+    );
+    expect(mockSetOutput).not.toHaveBeenCalled();
   });
 
   test('extra-args are split on newlines and passed through', async () => {

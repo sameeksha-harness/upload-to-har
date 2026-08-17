@@ -2,18 +2,11 @@
  * HAR module — builds and runs harness CLI (hc) commands.
  * Kept free of @actions/* imports so it's independently unit-testable.
  *
- * Real CLI command structure (verified from harness-cli source):
+ * CLI command structure:
  *   hc auth login --api-url <url> --api-token <token> --account <id> --non-interactive
  *   hc artifact push generic  <registry> <file> --name <name> --version <version>
  *   hc artifact push <type>   <registry> <file>
  *     (rpm, maven, npm, conda, composer, go, cargo, dart, python, nuget, swift, puppet, debian)
- *
- * Sources verified:
- *   cmd/auth/login.go       — flags: --api-url, --api-token, --account, --non-interactive
- *   cmd/artifact/command/push_generic.go — flags: positional <registry> <path>, --name (required), --version
- *   cmd/artifact/command/push_rpm.go     — positional <registry_name> <file_path>, no extra flags
- *   cmd/artifact/root.go    — subcommand path is "artifact push <type>"
- *   cmd/hc/main.go          — SilenceErrors:true; errors print to stdout; exit code 1 on failure
  */
 
 export interface HarInputs {
@@ -23,9 +16,16 @@ export interface HarInputs {
   registry: string;
   type: string;
   file: string;
-  name: string;
-  version: string;
+  name: string;       // required for generic/swift; used to build registry-path for others
+  version: string;    // required for generic/go/swift/terraform modules; embedded in file for others
   extraArgs: string[];
+  // Type-specific optional inputs
+  pomFile: string;      // maven: --pom-file <path>
+  distribution: string; // debian: --distribution <e.g. focal>
+  component: string;    // debian: --component <e.g. main>
+  namespace: string;    // terraform: --namespace <ns>
+  scope: string;        // swift: combined with name+version as <SCOPE>/<NAME>/<VERSION> positional
+  reference: string;    // conan: <reference> positional (e.g. pkg/1.0.0@user/channel)
 }
 
 export interface PushResult {
@@ -52,7 +52,7 @@ export async function login(inputs: HarInputs, exec: ExecFn): Promise<void> {
 
   const { exitCode, stdout, stderr } = await exec('hc', args);
   if (exitCode !== 0) {
-    // Cobra SilenceErrors=true means the error message lands on stdout, not stderr.
+    // hc prints errors to stdout (not stderr) and exits with code 1.
     const detail = stdout.trim() || stderr.trim() || '(no output)';
     throw new Error(`hc auth login failed (exit ${exitCode}): ${detail}`);
   }
@@ -61,63 +61,78 @@ export async function login(inputs: HarInputs, exec: ExecFn): Promise<void> {
 /**
  * Builds the argument array for "hc artifact push <type> ...".
  *
- * generic type:
- *   ["artifact", "push", "generic", "<registry>", "<file>", "--name", "<name>", "--version", "<version>"]
- *
- * all other types:
- *   ["artifact", "push", "<type>", "<registry>", "<file>"]
- *   (name/version are derived from the package file's own metadata by the CLI)
- *
- * NOTE: --version is not supported as a standalone flag for non-generic types —
- * each package format (rpm, maven, npm, etc.) reads version from its own metadata.
- * If you need to override version for those types, use extra-args.
+ * Each type has its own required positional args and flags — see inline comments.
+ * Extra args (from the extra-args input) are always appended last.
  */
 export function buildPushArgs(inputs: HarInputs): string[] {
-  const { type, registry, file, name, version, extraArgs } = inputs;
+  const {
+    type, registry, file, name, version, extraArgs,
+    pomFile, distribution, component, namespace, scope, reference,
+  } = inputs;
 
-  const base = ['artifact', 'push', type, registry, file];
+  let args: string[];
+  switch (type) {
+    case 'generic':
+      // --name and --version both required (validated in index.ts)
+      args = ['artifact', 'push', 'generic', registry, file, '--name', name, '--version', version];
+      break;
 
-  let typeFlags: string[];
-  if (type === 'generic') {
-    // push_generic.go: --name is required, --version defaults to "1.0.0"
-    typeFlags = ['--name', name, '--version', version];
-  } else if (type === 'go' || type === 'terraform') {
-    // push_go.go, push_terraform.go: support --version flag
-    // all other types read version from the package file's own metadata
-    typeFlags = ['--version', version];
-  } else {
-    typeFlags = [];
+    case 'maven':
+      // --pom-file required; version is read from the POM
+      args = ['artifact', 'push', 'maven', registry, file, '--pom-file', pomFile];
+      break;
+
+    case 'debian':
+      // --distribution and --component required
+      args = ['artifact', 'push', 'debian', registry, file,
+        '--distribution', distribution, '--component', component];
+      break;
+
+    case 'terraform':
+      // --namespace required; --version required for modules (omit for providers)
+      args = ['artifact', 'push', 'terraform', registry, file, '--namespace', namespace];
+      if (version) args.push('--version', version);
+      break;
+
+    case 'swift':
+      // third positional: <SCOPE>/<NAME>/<VERSION>
+      args = ['artifact', 'push', 'swift', registry, file, `${scope}/${name}/${version}`];
+      break;
+
+    case 'conan':
+      // hc artifact push conan <registry> <reference> <recipe_dir>
+      // file input is used as the recipe directory
+      args = ['artifact', 'push', 'conan', registry, reference, file];
+      break;
+
+    case 'go':
+      // --version required (no metadata file to read from)
+      args = ['artifact', 'push', 'go', registry, file, '--version', version];
+      break;
+
+    default:
+      // cargo, composer, conda, dart, npm, nuget, puppet, python, rpm
+      // version is embedded in the package file — no extra flags needed
+      args = ['artifact', 'push', type, registry, file];
   }
 
-  return [...base, ...typeFlags, ...extraArgs];
+  return [...args, ...extraArgs];
 }
 
 /**
- * Parses plain-text stdout from "hc artifact push".
+ * Builds the registry-path output from push inputs.
  *
- * The CLI does NOT support --format json for push commands — they use
- * progress.Success(...) / fmt.Printf, not printer.Print. Structured output
- * flags have no effect here.
- *
- * Observed success patterns (from harness-cli source):
- *   generic:  no explicit success line; zero exit = success
- *   rpm/conda/composer/cargo/python/nuget/swift/debian:
- *             "Successfully uploaded package <filePath>"
- *   npm:      "Successfully uploaded NPM package '<name>@<version>' to registry '<registry>'"
- *   dart:     "Successfully uploaded Dart package '<name>@<version>' to registry '<registry>'"
- *   puppet:   "Successfully uploaded Puppet module '<name>@<version>' to registry '<registry>'"
- *   maven:    "Successfully uploaded package"
- *   go:       "Successfully uploaded package <packageName>"
- *
- * TODO: confirm these patterns against real CLI output from local/QA runs.
+ * hc artifact push does not emit structured output, so we construct the
+ * canonical path from the inputs. Format: <registry>/<name>@<version>
+ * Falls back gracefully when name/version are not provided (e.g. for types
+ * where they are embedded in the package file).
  */
 export function parsePushOutput(stdout: string, inputs: HarInputs): PushResult {
-  const { registry, name, version, type } = inputs;
+  const { registry, name, version } = inputs;
 
-  // Derive a canonical registry-path for the output regardless of which
-  // success line the CLI printed. The path follows HAR conventions:
-  //   <registry>/<name>@<version>
-  const registryPath = `${registry}/${name}@${version}`;
+  let registryPath = registry;
+  if (name) registryPath += `/${name}`;
+  if (version) registryPath += `@${version}`;
 
   return {
     registryPath,
@@ -133,8 +148,7 @@ export async function push(
   const { exitCode, stdout, stderr } = await exec('hc', args);
 
   if (exitCode !== 0) {
-    // Cobra SilenceErrors=true: error message is on stdout; stderr may have
-    // verbose log lines if --verbose was passed (it wasn't, so stderr is likely empty).
+    // hc prints errors to stdout (not stderr) and exits with code 1.
     const detail = stdout.trim() || stderr.trim() || '(no output)';
     throw new Error(
       `hc artifact push ${inputs.type} failed (exit ${exitCode}): ${detail}`,

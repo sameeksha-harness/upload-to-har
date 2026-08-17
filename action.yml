@@ -16,17 +16,43 @@ inputs:
     description: 'HAR registry name'
     required: true
   type:
-    description: 'Artifact type: generic, docker, maven, rpm, npm, conda, composer, go, cargo, dart, python, nuget, swift, puppet, debian'
+    description: 'Artifact type: generic, maven, rpm, npm, conda, composer, go, cargo, dart, python, nuget, swift, puppet, debian, conan, terraform'
     required: true
   file:
-    description: 'Local path to the file to upload'
+    description: 'Local path to the file or directory to upload. For conan, this is the recipe directory.'
     required: true
   name:
-    description: 'Artifact/package name (used for generic type)'
-    required: true
+    description: 'Artifact name. Required for generic and swift. Used to build the registry-path output for other types.'
+    required: false
+    default: ''
   version:
-    description: 'Artifact version'
-    required: true
+    description: 'Artifact version. Required for generic, go, swift, and terraform modules. Embedded in the package file for other types.'
+    required: false
+    default: ''
+  pom-file:
+    description: 'Path to the POM file. Required for maven.'
+    required: false
+    default: ''
+  distribution:
+    description: 'Debian distribution (e.g. focal, bullseye). Required for debian.'
+    required: false
+    default: ''
+  component:
+    description: 'Debian component (e.g. main, contrib, non-free). Required for debian.'
+    required: false
+    default: ''
+  namespace:
+    description: 'Terraform namespace. Required for terraform.'
+    required: false
+    default: ''
+  scope:
+    description: 'Swift scope. Required for swift. Combined with name and version as <scope>/<name>/<version>.'
+    required: false
+    default: ''
+  reference:
+    description: 'Conan reference (e.g. pkg/1.0.0@user/channel). Required for conan.'
+    required: false
+    default: ''
   extra-args:
     description: 'Newline-separated extra CLI arguments appended to the push command'
     required: false
