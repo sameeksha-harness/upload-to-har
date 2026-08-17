@@ -1,19 +1,17 @@
 # upload-to-har
 
-[![CI](https://github.com/harness/upload-to-har/actions/workflows/ci.yml/badge.svg)](https://github.com/harness/upload-to-har/actions/workflows/ci.yml)
-[![license badge](https://img.shields.io/github/license/harness/upload-to-har)](./LICENSE)
+[![CI](https://github.com/sameeksha-harness/upload-to-har/actions/workflows/ci.yml/badge.svg)](https://github.com/sameeksha-harness/upload-to-har/actions/workflows/ci.yml)
+[![license badge](https://img.shields.io/github/license/sameeksha-harness/upload-to-har)](./LICENSE)
 
-A GitHub Action that uploads a local file to [Harness Artifact Registry (HAR)](https://developer.harness.io/docs/artifact-registry) using the [harness CLI (`hc`)](https://github.com/harness/harness-cli).
+A GitHub Action that uploads artifacts to [Harness Artifact Registry (HAR)](https://developer.harness.io/docs/artifact-registry) using the [Harness CLI (`hc`)](https://github.com/harness/harness-cli).
 
-Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer`, `go`, `cargo`, `dart`, `python`, `nuget`, `swift`, `puppet`, `debian`, `conan`, `terraform`.
+Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer`, `go`, `cargo`, `dart`, `python`, `nuget`, `swift`, `puppet`, `debian`, `conan`, and `terraform`.
 
-## Examples
-
-### Generic
+## Usage
 
 ```yaml
-- name: Upload to HAR
-  uses: harness/upload-to-har@v1
+- name: Upload to Harness Artifact Registry
+  uses: sameeksha-harness/upload-to-har@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -25,11 +23,13 @@ Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer
     version: ${{ github.sha }}
 ```
 
+## Examples
+
 ### Maven
 
 ```yaml
-- name: Upload to HAR
-  uses: harness/upload-to-har@v1
+- name: Upload JAR to HAR
+  uses: sameeksha-harness/upload-to-har@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -43,8 +43,8 @@ Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer
 ### npm
 
 ```yaml
-- name: Upload to HAR
-  uses: harness/upload-to-har@v1
+- name: Upload npm package to HAR
+  uses: sameeksha-harness/upload-to-har@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -54,68 +54,18 @@ Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer
     file: my-package-1.0.0.tgz
 ```
 
-### Debian
+### Python
 
 ```yaml
-- name: Upload to HAR
-  uses: harness/upload-to-har@v1
+- name: Upload Python package to HAR
+  uses: sameeksha-harness/upload-to-har@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
     token: ${{ secrets.HARNESS_PAT_TOKEN }}
-    registry: my-debian-registry
-    type: debian
-    file: my-package_1.0.0_amd64.deb
-    distribution: focal
-    component: main
-```
-
-### Terraform module
-
-```yaml
-- name: Upload to HAR
-  uses: harness/upload-to-har@v1
-  with:
-    api-url: https://app.harness.io
-    account: ${{ secrets.HARNESS_ACCOUNT_ID }}
-    token: ${{ secrets.HARNESS_PAT_TOKEN }}
-    registry: my-terraform-registry
-    type: terraform
-    file: my-module.tar.gz
-    namespace: my-org
-    version: 1.2.0
-```
-
-### Swift
-
-```yaml
-- name: Upload to HAR
-  uses: harness/upload-to-har@v1
-  with:
-    api-url: https://app.harness.io
-    account: ${{ secrets.HARNESS_ACCOUNT_ID }}
-    token: ${{ secrets.HARNESS_PAT_TOKEN }}
-    registry: my-swift-registry
-    type: swift
-    file: my-package.zip
-    scope: my-org
-    name: my-lib
-    version: 1.0.0
-```
-
-### Conan
-
-```yaml
-- name: Upload to HAR
-  uses: harness/upload-to-har@v1
-  with:
-    api-url: https://app.harness.io
-    account: ${{ secrets.HARNESS_ACCOUNT_ID }}
-    token: ${{ secrets.HARNESS_PAT_TOKEN }}
-    registry: my-conan-registry
-    type: conan
-    file: ./recipe          # recipe directory
-    reference: mylib/1.0.0@user/stable
+    registry: my-python-registry
+    type: python
+    file: dist/my_package-1.0.0-py3-none-any.whl
 ```
 
 ### Using the output
@@ -123,7 +73,7 @@ Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer
 ```yaml
 - name: Upload to HAR
   id: upload
-  uses: harness/upload-to-har@v1
+  uses: sameeksha-harness/upload-to-har@v1
   with:
     api-url: https://app.harness.io
     account: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -142,9 +92,9 @@ Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `api-url` | yes | — | Harness API base URL. Pass the bare origin — no trailing slash (`https://app.harness.io`, `https://qa.harness.io`). |
+| `api-url` | yes | — | Harness API base URL. Pass the bare origin with no trailing slash (e.g. `https://app.harness.io`). |
 | `account` | yes | — | Harness account ID. |
-| `token` | yes | — | Harness PAT token. Always pass via `${{ secrets.* }}` — the action masks it from logs. |
+| `token` | yes | — | Harness PAT token. Always pass via `${{ secrets.* }}` — the action masks it from logs automatically. |
 | `registry` | yes | — | HAR registry name. |
 | `type` | yes | — | Artifact type. See [Supported types](#supported-types). |
 | `file` | yes | — | Local path to the file (or directory, for `conan`) to upload. |
@@ -162,30 +112,30 @@ Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer
 
 | Output | Description |
 |--------|-------------|
-| `registry-path` | Path of the uploaded artifact in the format `<registry>/<name>@<version>`. Falls back gracefully when `name` or `version` are not provided (e.g. types where they are embedded in the package file). |
+| `registry-path` | Path of the uploaded artifact in the format `<registry>/<name>@<version>`. |
 
 ## Supported types
 
-| Type | Notes |
-|------|-------|
-| `generic` | Requires `name` and `version`. |
-| `maven` | Requires `pom-file`. Version is read from the POM. |
-| `npm` | Version is embedded in the package file. |
-| `rpm` | Version is embedded in the package file. |
-| `conda` | Version is embedded in the package file. |
-| `composer` | Version is embedded in the package file. |
-| `cargo` | Version is embedded in the package file. |
-| `dart` | Version is embedded in the package file. |
-| `python` | Version is embedded in the package file. |
-| `nuget` | Version is embedded in the package file. |
-| `puppet` | Version is embedded in the package file. |
-| `go` | Requires `version`. |
-| `swift` | Requires `scope`, `name`, and `version`. |
-| `debian` | Requires `distribution` and `component`. |
-| `conan` | Requires `reference`. `file` is the recipe directory. |
-| `terraform` | Requires `namespace`. `version` is required for modules, optional for providers. |
+| Type | Required inputs | Notes |
+|------|----------------|-------|
+| `generic` | `name`, `version` | |
+| `maven` | `pom-file` | Version is read from the POM. |
+| `npm` | — | Version is embedded in the package file. |
+| `rpm` | — | Version is embedded in the package file. |
+| `conda` | — | Version is embedded in the package file. |
+| `composer` | — | Version is embedded in the package file. |
+| `cargo` | — | Version is embedded in the package file. |
+| `dart` | — | Version is embedded in the package file. |
+| `python` | — | Version is embedded in the package file. |
+| `nuget` | — | Version is embedded in the package file. |
+| `puppet` | — | Version is embedded in the package file. |
+| `go` | `version` | |
+| `swift` | `scope`, `name`, `version` | Positional arg built as `<scope>/<name>/<version>`. |
+| `debian` | `distribution`, `component` | |
+| `conan` | `reference` | `file` is the recipe directory. |
+| `terraform` | `namespace` | `version` required for modules, optional for providers. |
 
-> **Docker and Helm are not supported.** HAR exposes a standard OCI-compatible registry endpoint for Docker images (`docker push <registry-url>/image:tag`) and Helm charts (`helm push chart.tgz oci://<registry-url>`). Use those native tools directly — no `upload-to-har` step needed.
+> **Docker and Helm are not supported.** HAR exposes a standard OCI-compatible endpoint for both — use `docker push` and `helm push` directly.
 
 ## Contributing
 
@@ -205,12 +155,12 @@ npm test
 
 ```bash
 npm run build
-# produces dist/index.js — commit this alongside source changes
+# Produces dist/index.js — commit alongside source changes.
 ```
 
 ### Architecture
 
-- `src/har.ts` — pure logic: `login()`, `buildPushArgs()`, `parsePushOutput()`, `push()`. No `@actions/*` imports, independently unit-testable.
+- `src/har.ts` — pure logic (`login`, `buildPushArgs`, `parsePushOutput`, `push`). No `@actions/*` imports, independently unit-testable.
 - `src/index.ts` — wires `@actions/core` and `@actions/exec` to `har.ts`.
-- `src/install.ts` — automatically installs `hc` at the start of each run if it is not already on `PATH`. No manual install step needed in your workflow.
+- `src/install.ts` — automatically installs `hc` if not already on `PATH`. No manual install step needed in your workflow.
 - `@vercel/ncc` bundles everything into `dist/index.js` so `node_modules/` does not need to be committed.
