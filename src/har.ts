@@ -33,14 +33,41 @@ export interface PushResult {
   rawOutput: string;
 }
 
+export interface ExecOptions {
+  /** When true, suppress @actions/exec command/stdout echo (use for auth). */
+  silent?: boolean;
+}
+
 export type ExecFn = (
   cmd: string,
   args: string[],
+  options?: ExecOptions,
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+
+const MAX_ERROR_DETAIL_CHARS = 2048;
+
+/** Join non-empty stdout/stderr for error messages. */
+export function combineCliOutput(stdout: string, stderr: string): string {
+  return [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
+}
+
+/** Redact secrets and bound length before surfacing CLI output in errors. */
+export function sanitizeCliOutput(text: string, secret = ''): string {
+  let out = text.trim();
+  if (secret) {
+    // Split/join avoids regex metacharacter issues in tokens
+    out = out.split(secret).join('***');
+  }
+  if (out.length > MAX_ERROR_DETAIL_CHARS) {
+    out = `…${out.slice(-MAX_ERROR_DETAIL_CHARS)}`;
+  }
+  return out || '(no output)';
+}
 
 export async function login(inputs: HarInputs, exec: ExecFn): Promise<void> {
   // --non-interactive prevents the CLI from blocking on interactive prompts
   // in a CI environment where stdin is not a TTY.
+  // silent: true avoids logging argv (includes --api-token) via @actions/exec.
   const args = [
     'auth',
     'login',
@@ -50,11 +77,27 @@ export async function login(inputs: HarInputs, exec: ExecFn): Promise<void> {
     '--non-interactive',
   ];
 
-  const { exitCode, stdout, stderr } = await exec('hc', args);
+  const { exitCode, stdout, stderr } = await exec('hc', args, { silent: true });
   if (exitCode !== 0) {
     // hc prints errors to stdout (not stderr) and exits with code 1.
-    const detail = stdout.trim() || stderr.trim() || '(no output)';
+    const detail = sanitizeCliOutput(
+      combineCliOutput(stdout, stderr),
+      inputs.token,
+    );
     throw new Error(`hc auth login failed (exit ${exitCode}): ${detail}`);
+  }
+}
+
+/** Reject `/` in swift positional segments (scope/name/version). */
+export function validateSwiftInputs(scope: string, name: string, version: string): void {
+  for (const [value, label] of [
+    [scope, 'scope'],
+    [name, 'name'],
+    [version, 'version'],
+  ] as const) {
+    if (value.includes('/')) {
+      throw new Error(`Input "${label}" must not contain "/" for type "swift"`);
+    }
   }
 }
 
@@ -120,22 +163,45 @@ export function buildPushArgs(inputs: HarInputs): string[] {
 }
 
 /**
- * Builds the registry-path output from push inputs.
+ * Builds registry-path from push inputs only
  *
- * hc artifact push does not emit structured output, so we construct the
- * canonical path from the inputs. Format: <registry>/<name>@<version>
- * Falls back gracefully when name/version are not provided (e.g. for types
- * where they are embedded in the package file).
+ * - generic / go / others: <registry>/<name>@<version> (omits missing parts)
+ * - swift: <registry>/<scope>/<name>@<version>
+ * - conan: <registry>/<reference>
+ * - terraform: <registry>/<namespace>/<name>@<version> (omits missing parts)
+ *
+ * For package types whose identity is embedded in the file (npm, maven, …),
+ * pass optional name/version inputs when you want a full registry-path output.
  */
-export function parsePushOutput(stdout: string, inputs: HarInputs): PushResult {
-  const { registry, name, version } = inputs;
+export function buildRegistryPath(inputs: HarInputs): string {
+  const { type, registry, name, version, scope, reference, namespace } = inputs;
 
-  let registryPath = registry;
-  if (name) registryPath += `/${name}`;
-  if (version) registryPath += `@${version}`;
+  switch (type) {
+    case 'swift': {
+      const parts = [registry, scope, name].filter(Boolean);
+      const base = parts.join('/');
+      return version ? `${base}@${version}` : base;
+    }
+    case 'conan':
+      return reference ? `${registry}/${reference}` : registry;
+    case 'terraform': {
+      const parts = [registry, namespace, name].filter(Boolean);
+      const base = parts.join('/');
+      return version ? `${base}@${version}` : base;
+    }
+    default: {
+      let path = registry;
+      if (name) path += `/${name}`;
+      if (version) path += `@${version}`;
+      return path;
+    }
+  }
+}
 
+/** Attach raw CLI stdout to the input-derived registry path. */
+export function buildPushResult(stdout: string, inputs: HarInputs): PushResult {
   return {
-    registryPath,
+    registryPath: buildRegistryPath(inputs),
     rawOutput: stdout.trim(),
   };
 }
@@ -149,11 +215,14 @@ export async function push(
 
   if (exitCode !== 0) {
     // hc prints errors to stdout (not stderr) and exits with code 1.
-    const detail = stdout.trim() || stderr.trim() || '(no output)';
+    const detail = sanitizeCliOutput(
+      combineCliOutput(stdout, stderr),
+      inputs.token,
+    );
     throw new Error(
       `hc artifact push ${inputs.type} failed (exit ${exitCode}): ${detail}`,
     );
   }
 
-  return parsePushOutput(stdout, inputs);
+  return buildPushResult(stdout, inputs);
 }

@@ -4,7 +4,7 @@ author: 'Harness'
 
 inputs:
   api-url:
-    description: 'Harness API base URL (e.g. http://localhost:3000, https://qa.harness.io, https://app.harness.io)'
+    description: 'Harness API base URL (e.g. https://app.harness.io)'
     required: true
   account:
     description: 'Harness account ID'
@@ -16,6 +16,7 @@ inputs:
     description: 'HAR registry name'
     required: true
   type:
+    # Keep in sync with SUPPORTED_TYPES in src/types.ts
     description: 'Artifact type: generic, maven, rpm, npm, conda, composer, go, cargo, dart, python, nuget, swift, puppet, debian, conan, terraform'
     required: true
   file:
@@ -57,10 +58,14 @@ inputs:
     description: 'Newline-separated extra CLI arguments appended to the push command'
     required: false
     default: ''
+  hc-version:
+    description: 'Harness CLI (hc) release tag to install (e.g. v1.3.43). Defaults to the action-pinned version. If a different hc is already on PATH, it is reinstalled to match.'
+    required: false
+    default: 'v1.3.43'
 
 outputs:
   registry-path:
-    description: 'The registry/name@version path of the uploaded artifact'
+    description: 'Best-effort path built from inputs (not parsed from hc). generic/go: registry/name@version; swift: registry/scope/name@version; conan: registry/reference; terraform: registry/namespace/name@version; others omit missing name/version.'
 
 runs:
   using: 'node24'

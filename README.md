@@ -107,14 +107,27 @@ Supports 16 artifact types: `generic`, `maven`, `rpm`, `npm`, `conda`, `composer
 | `scope` | no | `""` | Swift scope. **Required** for `swift`. Combined with `name` and `version` as `<scope>/<name>/<version>`. |
 | `reference` | no | `""` | Conan reference (e.g. `pkg/1.0.0@user/channel`). **Required** for `conan`. |
 | `extra-args` | no | `""` | Newline-separated extra CLI arguments appended to the push command. |
+| `hc-version` | no | `v1.3.43` | Harness CLI (`hc`) release tag to install. If another version is already on `PATH`, the action reinstalls the requested pin into a job-local directory. |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
-| `registry-path` | Path of the uploaded artifact in the format `<registry>/<name>@<version>`. |
+| `registry-path` | Best-effort path built from **inputs** (not parsed from `hc`). |
+
+Format by type:
+
+| Type | `registry-path` |
+|------|-----------------|
+| `generic`, `go`, and others when `name`/`version` are set | `<registry>/<name>@<version>` |
+| `swift` | `<registry>/<scope>/<name>@<version>` |
+| `conan` | `<registry>/<reference>` |
+| `terraform` | `<registry>/<namespace>/<name>@<version>` (omits missing parts) |
+| metadata-embedded types (`npm`, `maven`, …) without `name`/`version` | often just `<registry>` — pass optional `name`/`version` if you need a fuller output |
 
 ## Supported types
+
+> **Source of truth:** `src/types.ts` (`SUPPORTED_TYPES`). Keep this table and `action.yml` in sync when adding types.
 
 | Type | Required inputs | Notes |
 |------|----------------|-------|
@@ -160,7 +173,8 @@ npm run build
 
 ### Architecture
 
-- `src/har.ts` — pure logic (`login`, `buildPushArgs`, `parsePushOutput`, `push`). No `@actions/*` imports, independently unit-testable.
+- `src/types.ts` — canonical `SUPPORTED_TYPES` list (keep `action.yml` / README in sync).
+- `src/har.ts` — pure logic (`login`, `buildPushArgs`, `buildRegistryPath`, `push`). No `@actions/*` imports, independently unit-testable.
 - `src/index.ts` — wires `@actions/core` and `@actions/exec` to `har.ts`.
-- `src/install.ts` — automatically installs `hc` if not already on `PATH`. No manual install step needed in your workflow.
+- `src/install.ts` — installs a pinned `hc` release (`hc-version`, default `v1.3.43`) into a job-local dir when missing or mismatched on `PATH`.
 - `@vercel/ncc` bundles everything into `dist/index.js` so `node_modules/` does not need to be committed.

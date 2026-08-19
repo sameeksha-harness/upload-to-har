@@ -1,4 +1,16 @@
-import { buildPushArgs, parsePushOutput, login, push, HarInputs, ExecFn } from '../src/har';
+import {
+  buildPushArgs,
+  buildRegistryPath,
+  buildPushResult,
+  combineCliOutput,
+  login,
+  push,
+  sanitizeCliOutput,
+  validateSwiftInputs,
+  HarInputs,
+  ExecFn,
+} from '../src/har';
+import { SUPPORTED_TYPES, isSupportedType, SUPPORTED_TYPES_LIST } from '../src/types';
 
 const baseInputs: HarInputs = {
   apiUrl: 'http://localhost:3000',
@@ -17,6 +29,67 @@ const baseInputs: HarInputs = {
   scope: '',
   reference: '',
 };
+
+// ─── types ────────────────────────────────────────────────────────────────────
+
+describe('SUPPORTED_TYPES', () => {
+  test('lists 16 types and isSupportedType agrees', () => {
+    expect(SUPPORTED_TYPES).toHaveLength(16);
+    expect(isSupportedType('generic')).toBe(true);
+    expect(isSupportedType('docker')).toBe(false);
+    expect(SUPPORTED_TYPES_LIST).toContain('terraform');
+  });
+});
+
+// ─── combineCliOutput / sanitizeCliOutput ─────────────────────────────────────
+
+describe('combineCliOutput', () => {
+  test('joins stdout and stderr when both present', () => {
+    expect(combineCliOutput('progress line', 'actual error')).toBe(
+      'progress line\nactual error',
+    );
+  });
+
+  test('returns single stream when the other is empty', () => {
+    expect(combineCliOutput('only stdout', '')).toBe('only stdout');
+    expect(combineCliOutput('', 'only stderr')).toBe('only stderr');
+  });
+});
+
+describe('sanitizeCliOutput', () => {
+  test('redacts secret substrings', () => {
+    expect(sanitizeCliOutput('token=pat.test-account-id.abc.xyz bad', baseInputs.token))
+      .toBe('token=*** bad');
+  });
+
+  test('returns (no output) for empty', () => {
+    expect(sanitizeCliOutput('   ')).toBe('(no output)');
+  });
+
+  test('truncates long output keeping the end', () => {
+    const long = 'x'.repeat(3000);
+    const out = sanitizeCliOutput(long);
+    expect(out.startsWith('…')).toBe(true);
+    expect(out.length).toBe(1 + 2048);
+  });
+});
+
+// ─── validateSwiftInputs ──────────────────────────────────────────────────────
+
+describe('validateSwiftInputs', () => {
+  test('accepts segments without slashes', () => {
+    expect(() => validateSwiftInputs('myorg', 'mylib', '1.0.0')).not.toThrow();
+  });
+
+  test('rejects slash in scope, name, or version', () => {
+    expect(() => validateSwiftInputs('my/org', 'mylib', '1.0.0'))
+      .toThrow('Input "scope" must not contain "/"');
+    expect(() => validateSwiftInputs('myorg', 'my/lib', '1.0.0'))
+      .toThrow('Input "name" must not contain "/"');
+    expect(() => validateSwiftInputs('myorg', 'mylib', '1.0/0'))
+      .toThrow('Input "version" must not contain "/"');
+  });
+});
 
 // ─── buildPushArgs ────────────────────────────────────────────────────────────
 
@@ -157,54 +230,65 @@ describe('buildPushArgs', () => {
   });
 });
 
-// ─── parsePushOutput ──────────────────────────────────────────────────────────
+// ─── buildRegistryPath / buildPushResult ──────────────────────────────────────
 
-describe('parsePushOutput', () => {
-  test('builds registry-path as registry/name@version when both provided', () => {
-    const result = parsePushOutput('Successfully uploaded', baseInputs);
+describe('buildRegistryPath', () => {
+  test('generic: registry/name@version', () => {
+    expect(buildRegistryPath(baseInputs)).toBe('my-registry/my-package@2.1.0');
+  });
+
+  test('omits missing name/version', () => {
+    expect(buildRegistryPath({ ...baseInputs, name: '', version: '' })).toBe('my-registry');
+    expect(buildRegistryPath({ ...baseInputs, version: '' })).toBe('my-registry/my-package');
+  });
+
+  test('swift: registry/scope/name@version', () => {
+    expect(buildRegistryPath({
+      ...baseInputs, type: 'swift', scope: 'myorg', name: 'mylib', version: '1.0.0',
+    })).toBe('my-registry/myorg/mylib@1.0.0');
+  });
+
+  test('conan: registry/reference', () => {
+    expect(buildRegistryPath({
+      ...baseInputs, type: 'conan', reference: 'mylib/1.0.0@user/stable', name: '', version: '',
+    })).toBe('my-registry/mylib/1.0.0@user/stable');
+  });
+
+  test('terraform: registry/namespace/name@version', () => {
+    expect(buildRegistryPath({
+      ...baseInputs, type: 'terraform', namespace: 'myorg', name: 'vpc', version: '1.2.0',
+    })).toBe('my-registry/myorg/vpc@1.2.0');
+  });
+
+  test('terraform provider without name: registry/namespace@version', () => {
+    expect(buildRegistryPath({
+      ...baseInputs, type: 'terraform', namespace: 'myorg', name: '', version: '1.2.0',
+    })).toBe('my-registry/myorg@1.2.0');
+  });
+});
+
+describe('buildPushResult', () => {
+  test('attaches trimmed stdout and input-derived path', () => {
+    const result = buildPushResult('\n  ok  \n', baseInputs);
+    expect(result.rawOutput).toBe('ok');
     expect(result.registryPath).toBe('my-registry/my-package@2.1.0');
-  });
-
-  test('builds registry-path without version when version is empty', () => {
-    const result = parsePushOutput('ok', { ...baseInputs, version: '' });
-    expect(result.registryPath).toBe('my-registry/my-package');
-  });
-
-  test('builds registry-path without name and version when both empty', () => {
-    const result = parsePushOutput('ok', { ...baseInputs, name: '', version: '' });
-    expect(result.registryPath).toBe('my-registry');
-  });
-
-  test('rawOutput trims leading/trailing whitespace', () => {
-    const result = parsePushOutput('\n  some output  \n', baseInputs);
-    expect(result.rawOutput).toBe('some output');
-  });
-
-  test('rpm success line produces correct registry-path', () => {
-    const stdout = [
-      '✓ Input parameters validated',
-      'Successfully uploaded package /tmp/pkg.rpm',
-    ].join('\n');
-    const result = parsePushOutput(stdout, { ...baseInputs, type: 'rpm', file: '/tmp/pkg.rpm' });
-    expect(result.registryPath).toBe('my-registry/my-package@2.1.0');
-    expect(result.rawOutput).toContain('Successfully uploaded package');
   });
 });
 
 // ─── login ────────────────────────────────────────────────────────────────────
 
 describe('login', () => {
-  test('calls hc with correct auth login flags', async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = [];
-    const fakeExec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
+  test('calls hc with correct auth login flags and silent option', async () => {
+    const calls: Array<{ cmd: string; args: string[]; options?: object }> = [];
+    const fakeExec: ExecFn = async (cmd, args, options) => {
+      calls.push({ cmd, args, options });
       return { exitCode: 0, stdout: 'Successfully logged into Harness', stderr: '' };
     };
 
     await login(baseInputs, fakeExec);
 
     expect(calls).toHaveLength(1);
-    const { cmd, args } = calls[0];
+    const { cmd, args, options } = calls[0];
     expect(cmd).toBe('hc');
     expect(args).toEqual([
       'auth', 'login',
@@ -213,6 +297,7 @@ describe('login', () => {
       '--account', 'test-account-id',
       '--non-interactive',
     ]);
+    expect(options).toEqual({ silent: true });
   });
 
   test('throws on non-zero exit code', async () => {
@@ -229,6 +314,26 @@ describe('login', () => {
       exitCode: 1, stdout: 'error: something went wrong', stderr: '',
     });
     await expect(login(baseInputs, fakeExec)).rejects.toThrow('error: something went wrong');
+  });
+
+  test('error message redacts token if present in CLI output', async () => {
+    const fakeExec: ExecFn = async () => ({
+      exitCode: 1,
+      stdout: `rejected ${baseInputs.token}`,
+      stderr: '',
+    });
+    await expect(login(baseInputs, fakeExec)).rejects.toThrow('rejected ***');
+  });
+
+  test('error message includes both stdout and stderr', async () => {
+    const fakeExec: ExecFn = async () => ({
+      exitCode: 1,
+      stdout: 'progress noise',
+      stderr: 'real failure',
+    });
+    await expect(login(baseInputs, fakeExec)).rejects.toThrow(
+      'progress noise\nreal failure',
+    );
   });
 });
 
@@ -268,5 +373,16 @@ describe('push', () => {
   test('throws with "(no output)" when stdout and stderr are both empty', async () => {
     const fakeExec: ExecFn = async () => ({ exitCode: 1, stdout: '', stderr: '' });
     await expect(push(baseInputs, fakeExec)).rejects.toThrow('(no output)');
+  });
+
+  test('error message includes both stdout and stderr', async () => {
+    const fakeExec: ExecFn = async () => ({
+      exitCode: 1,
+      stdout: 'upload step',
+      stderr: '403 Forbidden',
+    });
+    await expect(push(baseInputs, fakeExec)).rejects.toThrow(
+      'upload step\n403 Forbidden',
+    );
   });
 });

@@ -25659,13 +25659,35 @@ module.exports = {
  *     (rpm, maven, npm, conda, composer, go, cargo, dart, python, nuget, swift, puppet, debian)
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.combineCliOutput = combineCliOutput;
+exports.sanitizeCliOutput = sanitizeCliOutput;
 exports.login = login;
+exports.validateSwiftInputs = validateSwiftInputs;
 exports.buildPushArgs = buildPushArgs;
-exports.parsePushOutput = parsePushOutput;
+exports.buildRegistryPath = buildRegistryPath;
+exports.buildPushResult = buildPushResult;
 exports.push = push;
+const MAX_ERROR_DETAIL_CHARS = 2048;
+/** Join non-empty stdout/stderr for error messages. */
+function combineCliOutput(stdout, stderr) {
+    return [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
+}
+/** Redact secrets and bound length before surfacing CLI output in errors. */
+function sanitizeCliOutput(text, secret = '') {
+    let out = text.trim();
+    if (secret) {
+        // Split/join avoids regex metacharacter issues in tokens
+        out = out.split(secret).join('***');
+    }
+    if (out.length > MAX_ERROR_DETAIL_CHARS) {
+        out = `…${out.slice(-MAX_ERROR_DETAIL_CHARS)}`;
+    }
+    return out || '(no output)';
+}
 async function login(inputs, exec) {
     // --non-interactive prevents the CLI from blocking on interactive prompts
     // in a CI environment where stdin is not a TTY.
+    // silent: true avoids logging argv (includes --api-token) via @actions/exec.
     const args = [
         'auth',
         'login',
@@ -25674,11 +25696,23 @@ async function login(inputs, exec) {
         '--account', inputs.account,
         '--non-interactive',
     ];
-    const { exitCode, stdout, stderr } = await exec('hc', args);
+    const { exitCode, stdout, stderr } = await exec('hc', args, { silent: true });
     if (exitCode !== 0) {
         // hc prints errors to stdout (not stderr) and exits with code 1.
-        const detail = stdout.trim() || stderr.trim() || '(no output)';
+        const detail = sanitizeCliOutput(combineCliOutput(stdout, stderr), inputs.token);
         throw new Error(`hc auth login failed (exit ${exitCode}): ${detail}`);
+    }
+}
+/** Reject `/` in swift positional segments (scope/name/version). */
+function validateSwiftInputs(scope, name, version) {
+    for (const [value, label] of [
+        [scope, 'scope'],
+        [name, 'name'],
+        [version, 'version'],
+    ]) {
+        if (value.includes('/')) {
+            throw new Error(`Input "${label}" must not contain "/" for type "swift"`);
+        }
     }
 }
 /**
@@ -25731,22 +25765,45 @@ function buildPushArgs(inputs) {
     return [...args, ...extraArgs];
 }
 /**
- * Builds the registry-path output from push inputs.
+ * Builds registry-path from push inputs only
  *
- * hc artifact push does not emit structured output, so we construct the
- * canonical path from the inputs. Format: <registry>/<name>@<version>
- * Falls back gracefully when name/version are not provided (e.g. for types
- * where they are embedded in the package file).
+ * - generic / go / others: <registry>/<name>@<version> (omits missing parts)
+ * - swift: <registry>/<scope>/<name>@<version>
+ * - conan: <registry>/<reference>
+ * - terraform: <registry>/<namespace>/<name>@<version> (omits missing parts)
+ *
+ * For package types whose identity is embedded in the file (npm, maven, …),
+ * pass optional name/version inputs when you want a full registry-path output.
  */
-function parsePushOutput(stdout, inputs) {
-    const { registry, name, version } = inputs;
-    let registryPath = registry;
-    if (name)
-        registryPath += `/${name}`;
-    if (version)
-        registryPath += `@${version}`;
+function buildRegistryPath(inputs) {
+    const { type, registry, name, version, scope, reference, namespace } = inputs;
+    switch (type) {
+        case 'swift': {
+            const parts = [registry, scope, name].filter(Boolean);
+            const base = parts.join('/');
+            return version ? `${base}@${version}` : base;
+        }
+        case 'conan':
+            return reference ? `${registry}/${reference}` : registry;
+        case 'terraform': {
+            const parts = [registry, namespace, name].filter(Boolean);
+            const base = parts.join('/');
+            return version ? `${base}@${version}` : base;
+        }
+        default: {
+            let path = registry;
+            if (name)
+                path += `/${name}`;
+            if (version)
+                path += `@${version}`;
+            return path;
+        }
+    }
+}
+/** Attach raw CLI stdout to the input-derived registry path. */
+function buildPushResult(stdout, inputs) {
     return {
-        registryPath,
+        registryPath: buildRegistryPath(inputs),
         rawOutput: stdout.trim(),
     };
 }
@@ -25755,10 +25812,10 @@ async function push(inputs, exec) {
     const { exitCode, stdout, stderr } = await exec('hc', args);
     if (exitCode !== 0) {
         // hc prints errors to stdout (not stderr) and exits with code 1.
-        const detail = stdout.trim() || stderr.trim() || '(no output)';
+        const detail = sanitizeCliOutput(combineCliOutput(stdout, stderr), inputs.token);
         throw new Error(`hc artifact push ${inputs.type} failed (exit ${exitCode}): ${detail}`);
     }
-    return parsePushOutput(stdout, inputs);
+    return buildPushResult(stdout, inputs);
 }
 
 
@@ -25809,14 +25866,11 @@ const exec = __importStar(__nccwpck_require__(5236));
 const fs = __importStar(__nccwpck_require__(9896));
 const har_1 = __nccwpck_require__(804);
 const install_1 = __nccwpck_require__(232);
-const SUPPORTED_TYPES = [
-    'generic', 'maven', 'rpm', 'npm', 'conda', 'composer', 'go', 'cargo',
-    'dart', 'python', 'nuget', 'swift', 'puppet', 'debian', 'conan', 'terraform',
-];
+const types_1 = __nccwpck_require__(8522);
 function validateInputs(inputs) {
     const { type, file, name, version, pomFile, distribution, component, namespace, scope, reference } = inputs;
-    if (!SUPPORTED_TYPES.includes(type)) {
-        throw new Error(`Unsupported artifact type: "${type}". Supported types: ${SUPPORTED_TYPES.join(', ')}`);
+    if (!(0, types_1.isSupportedType)(type)) {
+        throw new Error(`Unsupported artifact type: "${type}". Supported types: ${types_1.SUPPORTED_TYPES_LIST}`);
     }
     // For conan, file is the recipe directory (may not exist yet in some workflows)
     // For all others, the file must exist on disk before we call hc
@@ -25856,6 +25910,7 @@ function validateInputs(inputs) {
                 throw new Error('Input "name" is required for type "swift"');
             if (!version)
                 throw new Error('Input "version" is required for type "swift"');
+            (0, har_1.validateSwiftInputs)(scope, name, version);
             break;
         case 'conan':
             if (!reference)
@@ -25864,11 +25919,12 @@ function validateInputs(inputs) {
     }
 }
 function buildExecFn() {
-    return async (cmd, args) => {
+    return async (cmd, args, options = {}) => {
         let stdout = '';
         let stderr = '';
         const exitCode = await exec.exec(cmd, args, {
             ignoreReturnCode: true,
+            silent: options.silent === true,
             listeners: {
                 stdout: (data) => { stdout += data.toString(); },
                 stderr: (data) => { stderr += data.toString(); },
@@ -25885,10 +25941,11 @@ function parseExtraArgs(raw) {
 }
 async function run() {
     try {
-        await (0, install_1.ensureHc)();
         const token = core.getInput('token', { required: true });
-        // Mask the token so it never appears in logs
+        // Mask before any hc/install logging that might echo process output
         core.setSecret(token);
+        const hcVersion = core.getInput('hc-version');
+        await (0, install_1.ensureHc)(hcVersion);
         const inputs = {
             apiUrl: core.getInput('api-url', { required: true }),
             account: core.getInput('account', { required: true }),
@@ -25910,11 +25967,21 @@ async function run() {
         validateInputs(inputs);
         const execFn = buildExecFn();
         core.startGroup('hc auth login');
-        await (0, har_1.login)(inputs, execFn);
-        core.endGroup();
+        try {
+            core.info(`hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`);
+            await (0, har_1.login)(inputs, execFn);
+        }
+        finally {
+            core.endGroup();
+        }
         core.startGroup(`hc artifact push ${inputs.type}`);
-        const result = await (0, har_1.push)(inputs, execFn);
-        core.endGroup();
+        let result;
+        try {
+            result = await (0, har_1.push)(inputs, execFn);
+        }
+        finally {
+            core.endGroup();
+        }
         core.setOutput('registry-path', result.registryPath);
         core.info(`Uploaded to ${result.registryPath}`);
     }
@@ -25969,27 +26036,134 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEFAULT_HC_VERSION = void 0;
+exports.normalizeHcVersion = normalizeHcVersion;
+exports.versionsMatch = versionsMatch;
 exports.ensureHc = ensureHc;
 const core = __importStar(__nccwpck_require__(7484));
 const exec = __importStar(__nccwpck_require__(5236));
-async function ensureHc() {
-    const alreadyInstalled = await exec.exec('which', ['hc'], {
+const fs = __importStar(__nccwpck_require__(9896));
+const os = __importStar(__nccwpck_require__(857));
+const path = __importStar(__nccwpck_require__(6928));
+/** Default harness-cli release tag. Bump deliberately when upgrading. */
+exports.DEFAULT_HC_VERSION = 'v1.3.43';
+const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/harness/harness-cli/v2/install';
+/** Allow only release-tag shapes (blocks shell metacharacters in install). */
+const HC_VERSION_RE = /^v?\d+(\.[\w-]+)*$/;
+/** Normalize to a leading-v tag (e.g. 1.3.43 → v1.3.43). Empty → default pin. */
+function normalizeHcVersion(version) {
+    const trimmed = version.trim();
+    if (!trimmed)
+        return exports.DEFAULT_HC_VERSION;
+    if (!HC_VERSION_RE.test(trimmed)) {
+        throw new Error(`Invalid hc-version "${trimmed}". Expected a release tag like v1.3.43`);
+    }
+    return trimmed.startsWith('v') ? trimmed : `v${trimmed}`;
+}
+/** Compare `hc version` stdout to an expected tag (with or without leading v). */
+function versionsMatch(versionOutput, expected) {
+    const want = normalizeHcVersion(expected).replace(/^v/, '');
+    const match = versionOutput.match(/hc version\s+(v?[\w.-]+)/i);
+    if (!match)
+        return false;
+    return match[1].replace(/^v/, '') === want;
+}
+async function isHcOnPath() {
+    const exitCode = await exec.exec('which', ['hc'], {
         ignoreReturnCode: true,
         silent: true,
-    }) === 0;
-    if (alreadyInstalled) {
-        core.debug('hc already on PATH, skipping install');
-        return;
+    });
+    return exitCode === 0;
+}
+async function readHcVersionOutput() {
+    let stdout = '';
+    const exitCode = await exec.exec('hc', ['version'], {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+        },
+    });
+    return exitCode === 0 ? stdout : '';
+}
+function resolveInstallDir() {
+    const base = process.env.RUNNER_TEMP || os.tmpdir();
+    return path.join(base, 'upload-to-har-hc');
+}
+async function installHc(version) {
+    const installDir = resolveInstallDir();
+    await fs.promises.mkdir(installDir, { recursive: true });
+    core.info(`Installing harness CLI (hc) ${version} into ${installDir}`);
+    // Official installer verifies release checksums. HC_VERSION pins the binary;
+    // INSTALL_DIR keeps the binary job-local and lets us override PATH.
+    const script = [
+        `curl -fsSL ${INSTALL_SCRIPT_URL}`,
+        `| INSTALL_DIR='${installDir}' HC_VERSION='${version}' sh`,
+    ].join(' ');
+    await exec.exec('sh', ['-c', script]);
+    core.addPath(installDir);
+}
+/**
+ * Ensures a matching `hc` is available.
+ * - If PATH already has the requested version, reuse it.
+ * - Otherwise install the pinned/requested version into a job-local dir and prepend PATH.
+ */
+async function ensureHc(requestedVersion = '') {
+    const version = normalizeHcVersion(requestedVersion);
+    if (await isHcOnPath()) {
+        const current = await readHcVersionOutput();
+        if (current && versionsMatch(current, version)) {
+            core.info(`hc ${version} already on PATH, skipping install`);
+            return;
+        }
+        core.info(`hc on PATH does not match ${version} (got: ${current.trim() || 'unknown'}); reinstalling pinned version`);
     }
-    core.info('Installing harness CLI (hc)...');
-    // v2 is a floating tag — always installs the latest v2.x release.
-    // Trade-off: mutable tag means we pick up fixes automatically but can't
-    // guarantee bit-for-bit reproducibility. To pin, replace v2 with a full
-    // commit SHA and verify the checksum before executing.
-    await exec.exec('sh', [
-        '-c',
-        'curl -fsSL https://raw.githubusercontent.com/harness/harness-cli/v2/install | sh',
-    ]);
+    await installHc(version);
+    const installed = await readHcVersionOutput();
+    if (!installed || !versionsMatch(installed, version)) {
+        throw new Error(`hc install completed but version mismatch: expected ${version}, got: ${installed.trim() || '(no output)'}`);
+    }
+    core.info(`Using hc ${version}`);
+}
+
+
+/***/ }),
+
+/***/ 8522:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SUPPORTED_TYPES_LIST = exports.SUPPORTED_TYPES = void 0;
+exports.isSupportedType = isSupportedType;
+/**
+ * Canonical list of artifact types this action supports.
+ * Keep action.yml `type` description and README in sync with this list.
+ */
+exports.SUPPORTED_TYPES = [
+    'generic',
+    'maven',
+    'rpm',
+    'npm',
+    'conda',
+    'composer',
+    'go',
+    'cargo',
+    'dart',
+    'python',
+    'nuget',
+    'swift',
+    'puppet',
+    'debian',
+    'conan',
+    'terraform',
+];
+exports.SUPPORTED_TYPES_LIST = exports.SUPPORTED_TYPES.join(', ');
+function isSupportedType(type) {
+    return exports.SUPPORTED_TYPES.includes(type);
 }
 
 

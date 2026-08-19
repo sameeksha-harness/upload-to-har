@@ -1,20 +1,16 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as fs from 'fs';
-import { login, push, HarInputs, ExecFn } from './har';
+import { login, push, HarInputs, ExecFn, ExecOptions, validateSwiftInputs } from './har';
 import { ensureHc } from './install';
-
-const SUPPORTED_TYPES = [
-  'generic', 'maven', 'rpm', 'npm', 'conda', 'composer', 'go', 'cargo',
-  'dart', 'python', 'nuget', 'swift', 'puppet', 'debian', 'conan', 'terraform',
-];
+import { isSupportedType, SUPPORTED_TYPES_LIST } from './types';
 
 function validateInputs(inputs: HarInputs): void {
   const { type, file, name, version, pomFile, distribution, component, namespace, scope, reference } = inputs;
 
-  if (!SUPPORTED_TYPES.includes(type)) {
+  if (!isSupportedType(type)) {
     throw new Error(
-      `Unsupported artifact type: "${type}". Supported types: ${SUPPORTED_TYPES.join(', ')}`,
+      `Unsupported artifact type: "${type}". Supported types: ${SUPPORTED_TYPES_LIST}`,
     );
   }
 
@@ -47,6 +43,7 @@ function validateInputs(inputs: HarInputs): void {
       if (!scope) throw new Error('Input "scope" is required for type "swift"');
       if (!name) throw new Error('Input "name" is required for type "swift"');
       if (!version) throw new Error('Input "version" is required for type "swift"');
+      validateSwiftInputs(scope, name, version);
       break;
     case 'conan':
       if (!reference) throw new Error('Input "reference" is required for type "conan"');
@@ -55,12 +52,13 @@ function validateInputs(inputs: HarInputs): void {
 }
 
 function buildExecFn(): ExecFn {
-  return async (cmd: string, args: string[]) => {
+  return async (cmd: string, args: string[], options: ExecOptions = {}) => {
     let stdout = '';
     let stderr = '';
 
     const exitCode = await exec.exec(cmd, args, {
       ignoreReturnCode: true,
+      silent: options.silent === true,
       listeners: {
         stdout: (data: Buffer) => { stdout += data.toString(); },
         stderr: (data: Buffer) => { stderr += data.toString(); },
@@ -80,11 +78,12 @@ function parseExtraArgs(raw: string): string[] {
 
 async function run(): Promise<void> {
   try {
-    await ensureHc();
-
     const token = core.getInput('token', { required: true });
-    // Mask the token so it never appears in logs
+    // Mask before any hc/install logging that might echo process output
     core.setSecret(token);
+
+    const hcVersion = core.getInput('hc-version');
+    await ensureHc(hcVersion);
 
     const inputs: HarInputs = {
       apiUrl:       core.getInput('api-url',      { required: true }),
@@ -110,12 +109,22 @@ async function run(): Promise<void> {
     const execFn = buildExecFn();
 
     core.startGroup('hc auth login');
-    await login(inputs, execFn);
-    core.endGroup();
+    try {
+      core.info(
+        `hc auth login --api-url ${inputs.apiUrl} --api-token *** --account ${inputs.account} --non-interactive`,
+      );
+      await login(inputs, execFn);
+    } finally {
+      core.endGroup();
+    }
 
     core.startGroup(`hc artifact push ${inputs.type}`);
-    const result = await push(inputs, execFn);
-    core.endGroup();
+    let result;
+    try {
+      result = await push(inputs, execFn);
+    } finally {
+      core.endGroup();
+    }
 
     core.setOutput('registry-path', result.registryPath);
     core.info(`Uploaded to ${result.registryPath}`);
